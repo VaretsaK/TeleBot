@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 
 TOKEN_BOT = "YOUR TOKEN HERE"
+filename = "person_data.pkl"
 expense_categories = {
     "food": [],
     "restaurants": [],
@@ -25,13 +26,27 @@ logging.basicConfig(
 
 
 class Money:
-    def __init__(self, amount: int, category: str, time=datetime.now()):
+    def __init__(self, amount: int, category: str):
         self.amount = amount
-        self.time = time
+        self.time = datetime.now()
         self.category = category
 
     def __str__(self):
         return f"{self.amount} in {self.category}"
+
+
+def read_file():
+    global user_info
+    try:
+        with open(filename, 'rb') as file:
+            user_info = pickle.load(file)
+    except EOFError:
+        logging.info("Initiation...")
+
+
+def write_file():
+    with open(filename, 'wb') as file:
+        pickle.dump(user_info, file)
 
 
 async def add_expense(update: Update, context: CallbackContext) -> None:
@@ -42,17 +57,13 @@ async def add_expense(update: Update, context: CallbackContext) -> None:
 
     if len(context.args) == 2:
         try:
-            amount = int(context.args[-1].strip())
+            amount = int(context.args[1].strip())
             category = context.args[0].strip()
         except ValueError:
             logging.error("Invalid amount format")
-            await update.message.reply_text("Your input is invalid, please, use only digits")
+            await update.message.reply_text("Your input is invalid, please, use only digits in 'sum' part")
             return
 
-        except IndexError:
-            logging.error("Invalid index")
-            await update.message.reply_text("Your should input at least something")
-            return
     else:
         logging.error("Invalid input")
         await update.message.reply_text("Your should input in a format <category> <sum>")
@@ -62,8 +73,15 @@ async def add_expense(update: Update, context: CallbackContext) -> None:
         user_info[user_id] = money_flow
 
     money = Money(amount, category)
-    user_info[user_id]["expenses"][category].append(money)
+    try:
+        user_info[user_id]["expenses"][category].append(money)
+    except KeyError:
+        logging.error("Invalid category")
+        await update.message.reply_text("You've entered wrong category.")
+        return
+
     await update.message.reply_text(f"Expense: {amount}$ in a {category} category was successfully added!")
+    write_file()
 
 
 async def list_categories(update: Update, context: CallbackContext) -> None:
@@ -116,7 +134,6 @@ async def list_expenses(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(f"{result}")
         except BadRequest:
             await update.message.reply_text("There is no expenses in chosen period.")
-            return
 
 
 async def add_income(update: Update, context: CallbackContext) -> None:
@@ -127,17 +144,13 @@ async def add_income(update: Update, context: CallbackContext) -> None:
 
     if len(context.args) == 2:
         try:
-            amount = int(context.args[-1].strip())
+            amount = int(context.args[1].strip())
             category = context.args[0].strip()
         except ValueError:
             logging.error("Invalid amount format")
-            await update.message.reply_text("Your input is invalid, please, use only digits")
+            await update.message.reply_text("Your input is invalid, please, use only digits in 'sum' part")
             return
 
-        except IndexError:
-            logging.error("Invalid index")
-            await update.message.reply_text("Your should input at least something")
-            return
     else:
         logging.error("Invalid input")
         await update.message.reply_text("Your should input in a format <category> <sum>")
@@ -149,6 +162,7 @@ async def add_income(update: Update, context: CallbackContext) -> None:
     money = Money(amount, category)
     user_info[user_id]["income"].append(money)
     await update.message.reply_text(f"Income: {amount}$ in a {category} category was successfully added!")
+    write_file()
 
 
 async def show_income(update: Update, context: CallbackContext) -> None:
@@ -165,19 +179,30 @@ async def show_income(update: Update, context: CallbackContext) -> None:
 
 
 async def remove_expense(update: Update, context: CallbackContext) -> None:
+    """
+        Format of removing expense: /remove <category> <expense number>
+    """
     user_id = update.message.from_user.id
 
     if not user_info.get(user_id):
         await update.message.reply_text("You don't have any expenses.")
         return
-
-    try:
-        category = context.args[0]
-        removed_idx = int(context.args[-1]) - 1
-        exp = user_info[user_id]["expenses"][category].pop(removed_idx)
-        await update.message.reply_text(f"{category}: {exp.amount}$ was successfully removed!")
-    except (ValueError, IndexError):
-        await update.message.reply_text("You've entered invalid index.")
+    if len(context.args) == 2:
+        try:
+            category = context.args[0]
+            removed_idx = int(context.args[1]) - 1
+            exp = user_info[user_id]["expenses"][category].pop(removed_idx)
+            await update.message.reply_text(f"{category}: {exp.amount}$ was successfully removed!")
+            write_file()
+        except (ValueError, IndexError):
+            logging.error("Invalid index")
+            await update.message.reply_text("You've entered invalid index.")
+        except KeyError:
+            logging.error("Invalid category")
+            await update.message.reply_text("You've entered wrong category.")
+    else:
+        logging.error("Invalid input")
+        await update.message.reply_text("Your should input in a format <category> <expense number>")
 
 
 async def statistics(update: Update, context: CallbackContext, timedel: timedelta, period: str) -> None:
@@ -241,23 +266,8 @@ async def start(update: Update, context: CallbackContext) -> None:
     )
 
 
-def save_file_decor(func):
-    def inner():
-        global user_info
-        filename = "person_data.pkl"
-        try:
-            with open(filename, 'rb') as file:
-                user_info = pickle.load(file)
-        except EOFError:
-            logging.info("Initiation...")
-        func()
-        with open(filename, 'wb') as file:
-            pickle.dump(user_info, file)
-    return inner
-
-
-@save_file_decor
 def run():
+    read_file()
     app = ApplicationBuilder().token(TOKEN_BOT).build()
     logging.info("Application build successfully")
 
